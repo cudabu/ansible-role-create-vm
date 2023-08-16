@@ -1,0 +1,33 @@
+#network-config
+{% if 'CentOS' in base_image_name %}
+network:
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      subnets:
+        - type: static
+          address: {{ primary_cidr }}
+          gateway: {{ gateway }}
+          dns_nameservers:
+            - 10.8.8.8
+{% if create_vm_secondary_ip_address is defined %}
+    - type: physical
+      name: eth1
+      subnets:
+        - type: static
+          address: {{ secondary_cidr }}
+{% endif %}
+{% endif %}
+
+{% if 'server-cloudimg-amd64' in base_image_name %}
+network:
+  version: 2
+  ethernets:
+    ens2:
+      dhcp4: no
+      addresses: [{{ primary_cidr }}]
+      gateway4: {{ gateway }}
+      nameservers:
+        addresses: [10.8.8.8]
+{% endif %}

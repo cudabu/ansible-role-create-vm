@@ -1,0 +1,19 @@
+virt-install \
+--name {{ create_vm_name }}.{{ domain }} \
+--memory {{ create_vm_ram_mb }} \
+--vcpus {{ create_vm_vcpus }} \
+--disk {{ vm_dir_results.path }}/image_{{ create_vm_name }}-1.img,device=disk,bus=virtio \
+--disk {{ vm_dir_results.path }}/image_{{ create_vm_name }}_clcnf.img,device=cdrom \
+--network type=direct,source={{ primary_interface.stdout }},source_mode=bridge,model=virtio \
+{% if create_vm_second_disk_size is defined %}
+--disk {{ vm_dir_results.path }}/image_{{ create_vm_name }}-2.qcow2,device=disk,bus=virtio \
+{% endif %}
+{% if create_vm_secondary_ip_address is defined %}
+--network type=direct,source={{ secondary_interface.stdout }},source_mode=bridge,model=virtio \
+{% endif %}
+--os-type generic \
+--virt-type kvm \
+--graphics none \
+--noautoconsole \
+--channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+--boot hd

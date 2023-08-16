@@ -1,0 +1,16 @@
+---
+# libvirt images location, can change to any location on the host
+pool_dir: "/var/lib/libvirt/images"
+
+# VM details
+domain: "{% raw %}{{ domain_name }}{% endraw %}"
+primary_subnet: "{% raw %}{{ ndc_gateway_netmask }}{% endraw %}"
+gateway: "{% raw %}{{ ndc_public_gateway_ip }}{% endraw %}"
+user: "{% raw %}{{ os_username }}{% endraw %}"
+user_pass: "{% raw %}{{ os_password }}{% endraw %}" #password is hashed prior to being used here
+ssh_key: "{% raw %}{{ ssh_key }}{% endraw %}"
+
+# Default VM values, uses Ubuntu Focial Foosa
+base_image_name: "focal-server-cloudimg-amd64.img"
+base_image_url: "https://cloud-images.ubuntu.com/focal/current/{% raw %}{{ base_image_name }}{% endraw %}"
+base_image_sha: "5e8c2914c5f054edf91af383e97ca83be160988157be8fc1bc76414c9bf99199"

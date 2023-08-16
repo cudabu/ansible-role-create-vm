@@ -1,0 +1,29 @@
+#cloud-config
+hostname: "{{ create_vm_name }}"
+fqdn: "{{ create_vm_name }}.{{ domain }}"
+manage_etc_hosts: false
+ssh_pwauth: true
+disable_root: true
+users:
+  - name: "{{ user }}"
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    ssh-authorized-keys:
+      - "{{ ssh_key }}"
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: "{{ user_pass }}"
+    - name: "{{ user }}"
+      password: "{{ user_pass }}"
+packages:
+ - qemu-guest-agent
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+growpart:
+  mode: auto
+  devices: ['/']

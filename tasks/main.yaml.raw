@@ -1,0 +1,155 @@
+- name: Set VM name
+  ansible.builtin.set_fact:
+    fqdn: "{{ create_vm_name }}.{{ domain }}"
+
+- name: Get VMs list
+  community.libvirt.virt:
+    command: list_vms
+  register: existing_vms
+  changed_when: true
+
+- name: Stop playback if VM already exists
+  ansible.builtin.fail:
+    msg: "VM {{ fqdn }} already exists, exiting."
+  when: 'fqdn in existing_vms.list_vms'
+
+- name: Ensure requirements in place
+  ansible.builtin.package:
+    name:
+      - cloud-image-utils
+    state: present
+  become: true
+
+- name: Download base image
+  become: true
+  ansible.builtin.get_url:
+    url: "{{ base_image_url }}"
+    dest: "{{ pool_dir }}/{{ base_image_name }}"
+    checksum: "sha256: {{ base_image_sha }}"
+    mode: "0644"
+  register: base_image
+
+- name: Create VM directory
+  ansible.builtin.file:
+    path: "{{ pool_dir }}/virtual_machines/{{ create_vm_name }}"
+    state: directory
+    mode: "0755"
+  register: vm_dir_results
+
+- name: Create VM image from base
+  ansible.builtin.copy:
+    dest: "{{ vm_dir_results.path }}/image_{{ create_vm_name }}-1.img"
+    src: "{{ pool_dir }}/{{ base_image_name }}"
+    mode: "0644"
+    remote_src: true
+  register: copy_results
+
+- name: Set netmask
+  when: create_vm_primary_ip_address is defined
+  ansible.builtin.set_fact:
+    primary_prefix: "{{ create_vm_primary_ip_address }}/{{ primary_subnet }}"
+
+- name: Get CIDRs
+  when: primary_prefix is defined
+  ansible.builtin.set_fact:
+    primary_cidr: "{{ primary_prefix | ansible.utils.ipaddr('host/prefix') }}"
+
+- name: Get interface for primary IP address
+  when: primary_prefix is defined
+  register: primary_interface
+  changed_when: false
+  ansible.builtin.shell: |
+    set -o pipefail
+    ip -4 addr show | grep "{{ ansible_host }}" | awk '{print $NF}'
+
+
+- name: Setup second NIC vars if exists
+  when: create_vm_secondary_ip_address is defined
+  block:
+    - name: Set netmask
+      when: create_vm_secondary_ip_address is defined
+      ansible.builtin.set_fact:
+        secondary_prefix: "{{ create_vm_secondary_ip_address }}/{{ create_vm_secondary_netmask }}"
+
+    - name: Get CIDRs
+      when: secondary_prefix is defined
+      changed_when: false
+      ansible.builtin.set_fact:
+        secondary_cidr: "{{ secondary_prefix | ansible.utils.ipaddr('host/prefix') }}"
+
+    - name: Get interface for secondary IP address
+      when: secondary_prefix is defined
+      register: secondary_interface
+      changed_when: false
+      ansible.builtin.shell: |
+        set -o pipefail
+        ip -d link show | grep -B 2 '802\.1Q id {{ create_vm_secondary_vlan }}' | awk '/^[0-9]+:/ {print $2}' | sed 's/@.*//' | head -1
+
+- name: Create network data from template
+  ansible.builtin.template:
+    src: network-template.yaml.j2
+    dest: "{{ vm_dir_results.path }}/{{ create_vm_name }}-network.yaml"
+    mode: "0644"
+
+- name: Create user data from template
+  ansible.builtin.template:
+    src: user-data-template.yaml.j2
+    dest: "{{ vm_dir_results.path }}/{{ create_vm_name }}-user-data.yaml"
+    mode: "0644"
+
+- name: Create cloud init disk
+  ansible.builtin.command: |
+    cloud-localds -v --network-config="{{ vm_dir_results.path }}/{{ create_vm_name }}-network.yaml" \
+    "{{ vm_dir_results.path }}/image_{{ create_vm_name }}_clcnf.img" \
+    "{{ vm_dir_results.path }}/{{ create_vm_name }}-user-data.yaml"
+  register: cloud_init_results
+  changed_when: cloud_init_results.rc != 0
+
+- name: Resize the OS image
+  ansible.builtin.command: |
+    qemu-img resize "{{ vm_dir_results.path }}/image_{{ create_vm_name }}-1.img" "{{ create_vm_image_size }}"
+  register: resize_results
+  changed_when: resize_results.rc != 0
+
+- name: Create the second disk
+  when: create_vm_second_disk_size is defined
+  ansible.builtin.command: |
+    qemu-img create -f qcow2 "{{ vm_dir_results.path }}/image_{{ create_vm_name }}-2.qcow2" "{{ create_vm_second_disk_size }}"
+  register: second_disk_results
+  changed_when: second_disk_results.rc != 0
+
+- name: Render the virt-install command template
+  ansible.builtin.template:
+    src: virt-install-template.j2
+    dest: /tmp/virt-install.sh
+    mode: "0644"
+
+- name: Execute the rendered virt-install command
+  ansible.builtin.command:
+    cmd: sh /tmp/virt-install.sh
+  register: virt_install_results
+  changed_when: virt_install_results.rc != 0
+
+- name: Set autostart for a VM
+  community.libvirt.virt:
+    name: "{{ create_vm_name }}.{{ domain }}"
+    autostart: true
+
+- name: Ensure VM is started
+  community.libvirt.virt:
+    name: "{{ create_vm_name }}.{{ domain }}"
+    state: running
+  register: vm_start_results
+  until: "vm_start_results is success"
+  retries: 15
+  delay: 2
+
+- name: Remove cloud-init user-data files
+  ansible.builtin.file:
+    path: "{{ vm_dir_results.path }}/{{ create_vm_name }}-user-data.yaml"
+    state: absent
+
+- name: Remove cloud-init  network files
+  ansible.builtin.file:
+    path: "{{ vm_dir_results.path }}/{{ create_vm_name }}-network.yaml"
+    state: absent
